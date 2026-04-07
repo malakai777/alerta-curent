@@ -3,63 +3,47 @@ import asyncio
 from playwright.async_api import async_playwright
 import requests
 
-def trimite_telegram_cu_poza(mesaj, poza_path):
+def trimite_telegram(mesaj):
     token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-    
-    # Trimitem textul
-    url_text = f"https://api.telegram.org/bot{token}/sendMessage"
-    requests.post(url_text, json={"chat_id": chat_id, "text": mesaj})
-    
-    # Trimitem poza
-    url_poza = f"https://api.telegram.org/bot{token}/sendPhoto"
-    with open(poza_path, "rb") as photo:
-        requests.post(url_poza, data={"chat_id": chat_id}, files={"photo": photo})
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    requests.post(url, json={"chat_id": chat_id, "text": mesaj})
 
 async def verifica_pod():
     pod = "RO001E110447409"
     url_site = "https://www.reteleelectrice.ro/intreruperi/"
-    poza_rezultat = "rezultat_pod.png"
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        # Ne dăm drept un iPhone ca să primim varianta mobilă a site-ului (mai simplă)
-        context = await browser.new_context(
-            viewport={'width': 375, 'height': 812},
-            user_agent='Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1'
-        )
+        context = await browser.new_context(user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
         page = await context.new_page()
         
         try:
-            print(f"Deschidem pagina...")
-            await page.goto(url_site, wait_until="networkidle", timeout=60000)
+            await page.goto(url_site, wait_until="networkidle")
             
-            # Așteptăm căsuța de POD
+            # Căutăm căsuța de POD
             input_selector = "input[placeholder*='POD']"
-            await page.wait_for_selector(input_selector, timeout=20000)
-            
-            # Scriem POD-ul
+            await page.wait_for_selector(input_selector, timeout=15000)
             await page.fill(input_selector, pod)
             
-            # Apăsăm butonul "Trimite" (cel portocaliu din poza ta)
-            await page.click("button:has-text('Trimite'), .btn-orange, input[type='submit']")
+            # Click pe butonul de trimitere
+            await page.click("button:has-text('Trimite'), .btn-orange")
             
-            # Așteptăm să se schimbe ceva pe ecran
-            await asyncio.sleep(10)
+            # Așteptăm să apară rezultatul
+            await asyncio.sleep(5)
             
-            # Facem poza la ecranul cu rezultatul
-            await page.screenshot(path=poza_rezultat, full_page=True)
+            # Luăm textul de sub căsuța de căutare (unde apare de obicei răspunsul)
+            # Extragem tot textul vizibil ca să fim siguri
+            continut_text = await page.inner_text("body")
             
-            # Extragem textul vizibil pentru log
-            text_rezultat = await page.inner_text("body")
-            
-            mesaj = f"📸 Iată ce am găsit pe site pentru POD {pod}:"
-            trimite_telegram_cu_poza(mesaj, poza_rezultat)
+            # Curățăm textul să fie mai ușor de citit
+            linii = [line.strip() for line in continut_text.split('\n') if len(line.strip()) > 5]
+            rezultat_relevat = "\n".join(linii[:20]) # Luăm primele 20 de linii relevante
+
+            trimite_telegram(f"🔍 Rezultat site pentru POD {pod}:\n\n{rezultat_relevat}")
 
         except Exception as e:
-            # Dacă dă eroare, facem o poză la unde s-a blocat
-            await page.screenshot(path="eroare.png")
-            trimite_telegram_cu_poza(f"❌ Robotul s-a blocat. Vezi în poză unde era:", "eroare.png")
+            trimite_telegram(f"❌ Robotul s-a blocat la introducerea POD-ului. Verifică manual: {url_site}")
         
         await browser.close()
 
