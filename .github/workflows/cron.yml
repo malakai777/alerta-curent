@@ -1,0 +1,28 @@
+name: Verificare Zilnica Curent
+on:
+  schedule:
+    - cron: '0 18 * * *' # Rulează în fiecare seară la ora 21:00 (ora României)
+  workflow_dispatch: # Îți permite să îl pornești tu manual pentru test
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout cod
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalare librarii
+        run: |
+          pip install requests beautifulsoup4 pdfplumber
+
+      - name: Executa scriptul
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+        
