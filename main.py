@@ -11,43 +11,45 @@ def trimite_alerta(mesaj):
     requests.post(url, json={"chat_id": chat_id, "text": mesaj})
 
 def verifica():
-    # Luam data curenta pentru a "ghici" folderul
+    # Pasul 1: Construim link-ul exact pe care l-ai confirmat tu
     acum = datetime.now()
-    an = acum.year
-    luna = acum.strftime("%m") # Va fi "04" pentru Aprilie
+    pdf_url = f"https://www.reteleelectrice.ro/content/dam/retele-electrice/intreruperi/programate/{acum.year}/{acum.strftime('%m')}/Ilfov.pdf"
     
-    # Aceasta este structura exacta de link pe care am vazut-o in pozele tale
-    pdf_url = f"https://www.reteleelectrice.ro/content/dam/retele-electrice/intreruperi/programate/{an}/{luna}/Ilfov.pdf"
-    
-    print(f"Incerc descarcarea directa de la: {pdf_url}")
-    
+    # Pasul 2: Ne "deghizăm" robotul ca să nu fie respins
+    session = requests.Session()
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/pdf'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Referer': 'https://www.reteleelectrice.ro/intreruperi/programate/',
+        'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
     }
 
     try:
-        response = requests.get(pdf_url, headers=headers, timeout=30)
+        # Prima dată vizităm pagina principală ca să luăm "cookie-urile" de acces
+        session.get("https://www.reteleelectrice.ro/intreruperi/programate/", headers=headers, timeout=20)
+        
+        # Acum încercăm să descărcăm PDF-ul folosind aceleași permisiuni
+        response = session.get(pdf_url, headers=headers, timeout=30)
         
         if response.status_code == 200:
             with pdfplumber.open(io.BytesIO(response.content)) as pdf:
-                full_text = ""
+                # Extragem tot textul din toate paginile
+                text_complet = ""
                 for page in pdf.pages:
-                    full_text += (page.extract_text() or "") + " "
+                    text_complet += (page.extract_text() or "") + "\n"
                 
-                # Curatam textul de spatii extra si facem litere mici
-                text_final = " ".join(full_text.split()).lower()
+                # Curățăm textul pentru o căutare sigură
+                text_final = " ".join(text_complet.lower().split())
                 
                 if "putna" in text_final:
-                    trimite_alerta(f"⚠️ ATENȚIE! Strada PUTNA a fost găsită în planificarea de Aprilie!\nSursa: {pdf_url}")
+                    trimite_alerta(f"⚠️ ALERTĂ CURENT: Strada PUTNA apare în PDF-ul de Aprilie!\nSursa: {pdf_url}")
                 else:
-                    trimite_alerta(f"✅ Verificat: Strada Putna NU apare în PDF-ul de Ilfov pe luna {luna}/{an}.\nPDF scanat: {pdf_url}")
+                    trimite_alerta(f"✅ Verificare reușită: Strada Putna NU apare în PDF-ul scanat ({acum.strftime('%m/%Y')}).")
         else:
-            # Daca e inceput de luna si folderul nu e inca creat
-            trimite_alerta(f"ℹ️ Furnizorul nu a incarcat inca PDF-ul pentru {luna}/{an} la adresa standard.\nStatus: {response.status_code}")
+            # Dacă site-ul tot dă eroare, trimitem link-ul ca să verifici tu cu un click
+            trimite_alerta(f"ℹ️ Robotul a fost blocat de site (Eroare {response.status_code}).\nVerifică manual aici: {pdf_url}")
 
     except Exception as e:
-        trimite_alerta(f"❌ Eroare la procesarea PDF-ului: {str(e)}")
+        trimite_alerta(f"❌ Eroare tehnică: {str(e)}")
 
 if __name__ == "__main__":
     verifica()
