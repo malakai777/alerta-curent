@@ -1,59 +1,38 @@
 import os
 import requests
-import pdfplumber
-import io
 from bs4 import BeautifulSoup
-import datetime
 
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+def trimite_test_telegram(mesaj):
+    token = os.environ.get('TELEGRAM_TOKEN')
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    requests.post(url, json={"chat_id": chat_id, "text": mesaj})
 
-def trimite_alerta(mesaj):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mesaj}
-    requests.post(url, json=payload)
+# 1. TEST INSTANT TELEGRAM
+print("Incerc sa trimit mesaj de test pe Telegram...")
+trimite_test_telegram("🚀 Robotul a pornit! Daca primesti asta, conexiunea cu Telegram e OK.")
 
-def verifica():
-    url_pagina = "https://www.reteleelectrice.ro/intreruperi/programate/"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    res = requests.get(url_pagina, headers=headers)
-    soup = BeautifulSoup(res.text, 'html.parser')
-    
-    # Pasul 1: Găsim toate link-urile care duc la PDF-uri de Ilfov
-    # Site-ul le listează de obicei pe toate, noi îl vrem pe cel mai nou
-    links = [a['href'] for a in soup.find_all('a', href=True) if "Ilfov" in a['href']]
-    
-    if not links:
-        print("Nu am găsit niciun PDF de Ilfov. Verifică dacă site-ul și-a schimbat structura.")
-        return
+# 2. VERIFICARE SITE
+url_pagina = "https://www.reteleelectrice.ro/intreruperi/programate/"
+print(f"Accesez pagina: {url_pagina}")
 
-    # Luăm primul link (de obicei cel de sus e cel mai recent)
-    pdf_url = links[0] if links[0].startswith('http') else "https://www.reteleelectrice.ro" + links[0]
-    print(f"Verific cel mai recent PDF găsit: {pdf_url}")
+res = requests.get(url_pagina, headers={'User-Agent': 'Mozilla/5.0'})
+soup = BeautifulSoup(res.text, 'html.parser')
 
-    # Pasul 2: Citim PDF-ul
-    try:
-        pdf_res = requests.get(pdf_url, headers=headers)
-        with pdfplumber.open(io.BytesIO(pdf_res.content)) as pdf:
-            found = False
-            for i, page in enumerate(pdf.pages):
-                text = page.extract_text()
-                # Căutăm strada Putna în Otopeni (case insensitive)
-                if text and "putna" in text.lower() and "otopeni" in text.lower():
-                    msg = f"⚠️ ALERTA CURENT OTOPENI!\nStrada Putna a fost găsită în planificarea de întreruperi.\nDetalii în PDF: {pdf_url}"
-                    trimite_alerta(msg)
-                    print(f"Am găsit strada la pagina {i+1}")
-                    found = True
-                    break # Ne oprim la prima găsire
-            
-            if not found:
-                print("Strada Putna nu figurează în acest PDF.")
-                # Opțional: trimite un mesaj de confirmare că scriptul a verificat dar e "curat"
-                # trimite_alerta("✅ Verificare finalizată: Nicio întrerupere găsită pentru Strada Putna.")
-                
-    except Exception as e:
-        print(f"Eroare la procesarea PDF-ului: {e}")
+# Cautam orice link care are .pdf in el
+toate_linkurile = soup.find_all('a', href=True)
+pdf_links = [l['href'] for l in toate_linkurile if ".pdf" in l['href'].lower()]
 
-if __name__ == "__main__":
-    verifica()
+print(f"Am gasit in total {len(toate_linkurile)} link-uri pe pagina.")
+print(f"Dintre care {len(pdf_links)} sunt PDF-uri.")
+
+if len(pdf_links) > 0:
+    print("PDF-uri gasite:")
+    for p in pdf_links:
+        print(f" -> {p}")
+else:
+    print("NU AM GASIT PDF-URI. Pagina pare goala pentru robot.")
+    # Daca e goala, printam primele 300 caractere din codul sursa pentru diagnostic
+    print("Sursa HTML (primele 300 caractere):")
+    print(res.text[:300])
     
