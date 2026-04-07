@@ -26,60 +26,50 @@ async def run():
         page = await context.new_page()
 
         try:
-            print(f"Pas 1: Navigăm direct la Planificate")
+            print(f"Pas 1: Navigăm la Planificate")
             await page.goto(URL_PLANIFICATE, wait_until="networkidle", timeout=60000)
-            
-            # Acceptăm cookies rapid
             try: await page.click("#onetrust-accept-btn-handler", timeout=5000)
             except: pass
 
-            # Determinăm luna curentă (ex: Aprilie)
             now = datetime.now()
             luna_nume = ["Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie", 
                          "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie"][now.month - 1]
 
-            print(f"Pas 2: Selectăm filtrele pentru {luna_nume} {now.year}")
+            # --- LOGICA DE FORȚARE A LUNII ---
+            print(f"Pas 2: Încercăm să setăm luna {luna_nume}...")
+            
+            for incercare in range(3): # Încearcă de maxim 3 ori
+                await page.locator('select[name="year"]').first.select_option(str(now.year))
+                await page.wait_for_timeout(1000)
+                await page.locator('select[name="month"]').first.select_option(label=luna_nume)
+                await page.wait_for_timeout(1000)
+                await page.locator('select[name="county"]').first.select_option(value="IF")
+                await page.wait_for_timeout(2000)
 
-            # Click pe An și selectăm
-            await page.locator('select[name="year"]').first.select_option(str(now.year))
-            await page.wait_for_timeout(1000)
-
-            # Click pe Lună și selectăm luna curentă
-            # Folosim label-ul (textul vizibil) pentru a fi siguri
-            await page.locator('select[name="month"]').first.select_option(label=luna_nume)
-            await page.wait_for_timeout(1000)
-
-            # Click pe Județ și selectăm Ilfov
-            await page.locator('select[name="county"]').first.select_option(value="IF")
-            await page.wait_for_timeout(1000)
+                # Verificăm dacă selecția a rămas corectă
+                luna_activa = await page.locator('select[name="month"]').first.evaluate("el => el.options[el.selectedIndex].text")
+                if luna_activa == luna_nume:
+                    print(f"✅ Succes! Luna a rămas setată pe {luna_nume}.")
+                    break
+                else:
+                    print(f"⚠️ Tentativa {incercare + 1} eșuată (a sărit la {luna_activa}). Reîncercăm...")
 
             print("Pas 3: Apăsăm Caută")
-            # Căutăm butonul de căutare care aparține de filtre
             await page.locator("button:has-text('Caută')").first.click()
-            
-            # Așteptare lungă pentru ca tabelul să se actualizeze
-            print("Așteptăm rezultatele...")
             await page.wait_for_timeout(10000)
 
-            # Verificăm dacă tabelul conține datele noastre
+            # Citim rezultatul final
             tabel_text = await page.inner_text("body")
             
-            # Debug: printăm ce lună vede robotul în pagină acum
-            if luna_nume.lower() in tabel_text.lower():
-                print(f"✅ Robotul confirmă că vede date pentru luna {luna_nume}.")
-            else:
-                print(f"⚠️ Atenție: Site-ul pare să fi rămas pe o altă lună.")
-
             if ORAS_CAUTAT in tabel_text.upper() and STRADA_CAUTATA in tabel_text.upper():
                 msg = f"📅 PLANIFICATĂ: Lucrare în Otopeni, Str. {STRADA_CAUTATA} detectată!"
                 send_telegram_msg(msg)
-                print("🚨 LUCRARE GĂSITĂ!")
+                print("🚨 AM GĂSIT LUCRARE ÎN TABEL!")
             else:
                 print(f"✅ Status: Nu sunt lucrări planificate pe {STRADA_CAUTATA} în {luna_nume}.")
 
         except Exception as e:
             print(f"❌ Eroare: {e}")
-            await page.screenshot(path="eroare_planificate.png")
         finally:
             await browser.close()
 
