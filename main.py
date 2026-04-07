@@ -4,7 +4,8 @@ import requests
 from playwright.async_api import async_playwright
 
 # --- CONFIGURARE ---
-POD_CODE = "RO001E110447409"
+# Actualizat cu noul tău POD
+POD_CODE = "RO001E143159840"
 TARGET_URL = "https://www.reteleelectrice.ro/intreruperi/"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -27,33 +28,25 @@ async def run():
 
         try:
             print(f"Pas 1: Navigăm către {TARGET_URL}")
-            # Folosim 'load' pentru stabilitate pe GitHub
             await page.goto(TARGET_URL, wait_until="load", timeout=60000)
-            
-            # Așteptăm să dispară eventualele ecrane de încărcare
             await page.wait_for_timeout(5000)
 
-            # Acceptăm cookies rapid
             try:
                 await page.click("#onetrust-accept-btn-handler", timeout=5000)
             except: pass
 
             print(f"Pas 2: Introducem POD {POD_CODE}")
-            # REZOLVARE EROARE: Folosim .first pentru a alege prima căsuță de POD găsită
             input_field = page.locator("input[name='getinfo_pod']").first
             await input_field.wait_for(state="visible", timeout=15000)
             await input_field.fill(POD_CODE)
 
             print("Pas 3: Trimitem...")
             await page.keyboard.press("Enter")
-            
-            # Așteptăm să apară rezultatul (pop-up-ul alb)
             await page.wait_for_timeout(10000) 
 
             content = await page.content()
             content_lower = content.lower()
 
-            # Cuvinte cheie care confirmă că TOTUL E BINE
             ok_keywords = [
                 "nu avem înregistrată nicio întrerupere", 
                 "nu sunt întreruperi",
@@ -61,10 +54,26 @@ async def run():
             ]
 
             if any(key in content_lower for key in ok_keywords):
-                print("✅ Status: OK (Fără avarii raportate)")
+                msg_ok = f"✅ Status OK: Nu sunt avarii pentru POD {POD_CODE}."
+                print(msg_ok)
+                # LINIE TEST: Șterge semnul '#' de mai jos dacă vrei mesaj de confirmare mereu
+                # send_telegram_msg(msg_ok) 
             else:
-                # Verificăm dacă măcar am ajuns la rezultat
                 if "deranjamente" in content_lower or "alimentarea cu energie" in content_lower:
+                    msg_avarie = f"🚨 ALERTA CURENT: Întrerupere detectată la POD {POD_CODE}! Verifică: {TARGET_URL}"
+                    print(msg_avarie)
+                    send_telegram_msg(msg_avarie)
+                else:
+                    print("❓ Status: Rezultatul nu a putut fi citit corect.")
+
+        except Exception as e:
+            print(f"❌ Eroare: {e}")
+        finally:
+            await browser.close()
+
+if __name__ == "__main__":
+    asyncio.run(run())
+    if "deranjamente" in content_lower or "alimentarea cu energie" in content_lower:
                     msg = f"⚠️ ALERTA CURENT: Posibilă întrerupere detectată pentru POD {POD_CODE}! Verifică manual aici: {TARGET_URL}"
                     print("🚨 Status: POSIBILĂ AVARIE DETECTATĂ!")
                     send_telegram_msg(msg)
