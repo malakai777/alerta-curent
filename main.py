@@ -8,42 +8,50 @@ def trimite_alerta(mesaj):
     token = os.environ.get('TELEGRAM_TOKEN')
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": mesaj})
+    payload = {"chat_id": chat_id, "text": mesaj}
+    r = requests.post(url, json=payload)
+    print(f"DEBUG Telegram Status: {r.status_code}")
 
 def verifica():
-    # 1. URL-ul paginii de baza
+    print("--- START VERIFICARE AGRESIVĂ ---")
     url_pagina = "https://www.reteleelectrice.ro/intreruperi/programate/"
     headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
         res = requests.get(url_pagina, headers=headers)
-        # 2. Cautam link-ul de Ilfov (cel mai nou)
+        # Găsim link-ul de Ilfov
         links = re.findall(r'href=[\'"]?([^\'" >]+Ilfov[^\'" >]+\.pdf)', res.text)
         
         if not links:
-            trimite_alerta("❌ Robotul nu a putut gasi link-ul PDF pe site. Verifica manual!")
+            trimite_alerta("❌ Robotul nu a găsit link-ul PDF pe site.")
             return
 
         pdf_url = links[0] if links[0].startswith('http') else "https://www.reteleelectrice.ro" + links[0]
-        
-        # 3. Descarcam si citim PDF-ul
+        print(f"Citesc PDF-ul: {pdf_url}")
+
         pdf_res = requests.get(pdf_url, headers=headers)
         with pdfplumber.open(io.BytesIO(pdf_res.content)) as pdf:
-            gasit = False
+            text_total = ""
             for page in pdf.pages:
-                text = page.extract_text()
-                if text and "putna" in text.lower():
-                    gasit = True
-                    break
+                # Extragem textul și eliminăm spațiile multiple sau semnele ciudate
+                raw_text = page.extract_text() or ""
+                text_total += " " + raw_text.replace("\n", " ")
+
+            # Curățăm textul: scoatem spațiile extra și facem litere mici
+            text_curat = " ".join(text_total.split()).lower()
             
-            if gasit:
-                trimite_alerta(f"⚠️ ATENȚIE! Strada Putna apare în tabelul de întreruperi!\nConsultă PDF-ul aici: {pdf_url}")
+            # Căutăm "putna" - folosim re.search pentru siguranță
+            if re.search(r'putna', text_curat):
+                print("SUCCES: Strada Putna a fost găsită!")
+                trimite_alerta(f"⚠️ ATENȚIE! Strada PUTNA apare în lista de întreruperi!\nLink PDF: {pdf_url}")
             else:
-                # Mesaj de liniste (optional, il poti sterge daca vrei sa fie silentios cand e totul ok)
-                trimite_alerta("✅ Verificare finalizată: Strada Putna NU apare în lista de întreruperi.")
-                
+                print("NOT FOUND: Strada nu apare în textul extras.")
+                # Trimitem acest mesaj DOAR pentru a confirma că botul e viu
+                trimite_alerta("✅ Robotul a verificat PDF-ul și NU a găsit strada Putna. Totul e OK!")
+
     except Exception as e:
-        trimite_alerta(f"❌ Eroare tehnica la rularea robotului: {str(e)}")
+        print(f"EROARE: {str(e)}")
+        trimite_alerta(f"❌ Eroare tehnică: {str(e)}")
 
 if __name__ == "__main__":
     verifica()
