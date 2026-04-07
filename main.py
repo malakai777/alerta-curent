@@ -4,7 +4,6 @@ import requests
 from playwright.async_api import async_playwright
 
 # --- CONFIGURARE ---
-# Actualizat cu noul tău POD
 POD_CODE = "RO001E143159840"
 TARGET_URL = "https://www.reteleelectrice.ro/intreruperi/"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -15,7 +14,8 @@ def send_telegram_msg(message):
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
             requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message}, timeout=10)
-        except: pass
+        except:
+            pass
 
 async def run():
     async with async_playwright() as p:
@@ -33,7 +33,8 @@ async def run():
 
             try:
                 await page.click("#onetrust-accept-btn-handler", timeout=5000)
-            except: pass
+            except:
+                pass
 
             print(f"Pas 2: Introducem POD {POD_CODE}")
             input_field = page.locator("input[name='getinfo_pod']").first
@@ -53,12 +54,12 @@ async def run():
                 "nu am găsit nicio întrerupere"
             ]
 
-            if any(key in content_lower for key in ok_keywords):
-                msg_ok = f"✅ Status OK: Nu sunt avarii pentru POD {POD_CODE}."
-                print(msg_ok)
-                # LINIE TEST: Șterge semnul '#' de mai jos dacă vrei mesaj de confirmare mereu
-                # send_telegram_msg(msg_ok) 
+            is_ok = any(key in content_lower for key in ok_keywords)
+
+            if is_ok:
+                print(f"✅ Status OK: Nu sunt avarii pentru POD {POD_CODE}.")
             else:
+                # Verificăm dacă măcar suntem pe pagina de rezultate
                 if "deranjamente" in content_lower or "alimentarea cu energie" in content_lower:
                     msg_avarie = f"🚨 ALERTA CURENT: Întrerupere detectată la POD {POD_CODE}! Verifică: {TARGET_URL}"
                     print(msg_avarie)
@@ -68,21 +69,6 @@ async def run():
 
         except Exception as e:
             print(f"❌ Eroare: {e}")
-        finally:
-            await browser.close()
-
-if __name__ == "__main__":
-    asyncio.run(run())
-    if "deranjamente" in content_lower or "alimentarea cu energie" in content_lower:
-                    msg = f"⚠️ ALERTA CURENT: Posibilă întrerupere detectată pentru POD {POD_CODE}! Verifică manual aici: {TARGET_URL}"
-                    print("🚨 Status: POSIBILĂ AVARIE DETECTATĂ!")
-                    send_telegram_msg(msg)
-                else:
-                    print("❓ Status: Pagina nu pare să fi încărcat rezultatul corect.")
-
-        except Exception as e:
-            print(f"❌ Eroare: {e}")
-            await page.screenshot(path="debug.png")
         finally:
             await browser.close()
 
