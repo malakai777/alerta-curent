@@ -37,7 +37,6 @@ async def run():
             except: pass
 
             input_pod = page.locator("input[name='getinfo_pod']").first
-            await input_pod.wait_for(state="visible", timeout=10000)
             await input_pod.fill(POD_CODE)
             await page.keyboard.press("Enter")
             await page.wait_for_timeout(7000)
@@ -47,24 +46,43 @@ async def run():
                 if "deranjamente" in content.lower():
                     send_telegram_msg(f"🚨 ALERTĂ: Avarie curentă detectată la POD {POD_CODE}!")
 
-            # --- PASUL 2: VERIFICARE PLANIFICATE (NAVIGARE DIRECTĂ) ---
+            # --- PASUL 2: VERIFICARE PLANIFICATE ---
             print("Pas 2: Verificare Planificate (Navigare Directă)")
             await page.goto(URL_PLANIFICATE, wait_until="networkidle", timeout=60000)
             
             now = datetime.now()
-            # Selectăm filtrele folosind id-uri sau label-uri mai specifice
-            # Pe pagina dedicată, selectoarele sunt de obicei mai stabile
+            # REZOLVARE: Folosim .first sau selectoare ierarhice pentru a evita eroarea de "multiple elements"
             try:
-                await page.select_option("select[name='year']", str(now.year))
-                await page.select_option("select[name='month']", str(now.month))
-                await page.select_option("select[name='county']", "IF")
+                print(f"Selectăm filtrele pentru: {now.month}/{now.year}, Ilfov")
                 
-                await page.click("button:has-text('Caută')")
+                # Selectăm Anul
+                await page.locator("select[name='year']").first.select_option(str(now.year))
+                # Selectăm Luna
+                await page.locator("select[name='month']").first.select_option(str(now.month))
+                # Selectăm Județul (IF = Ilfov)
+                await page.locator("select[name='county']").first.select_option("IF")
+                
+                # Apăsăm butonul de Căutare (cel de lângă filtre)
+                await page.locator("button:has-text('Caută')").first.click()
                 await page.wait_for_timeout(7000)
 
-                tabel = await page.content()
-                if ORAS_CAUTAT in tabel.upper() and "PUTNA" in tabel.upper():
+                tabel_text = await page.inner_text("body")
+                if ORAS_CAUTAT in tabel_text.upper() and "PUTNA" in tabel_text.upper():
                     send_telegram_msg(f"📅 PLANIFICATĂ: Lucrare detectată în Otopeni, Str. Putna!")
+                else:
+                    print(f"✅ Status: Nu sunt lucrări planificate în {ORAS_CAUTAT} pe strada ta.")
+            
+            except Exception as e:
+                print(f"⚠️ Eroare la filtrare: {e}")
+
+        except Exception as e:
+            print(f"❌ Eroare generală: {e}")
+        finally:
+            await browser.close()
+
+if __name__ == "__main__":
+    asyncio.run(run())
+    send_telegram_msg(f"📅 PLANIFICATĂ: Lucrare detectată în Otopeni, Str. Putna!")
                 else:
                     print("✅ Status: Nu sunt lucrări planificate pe strada ta.")
             except Exception as e:
