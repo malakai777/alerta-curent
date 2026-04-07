@@ -2,7 +2,7 @@ import os
 import requests
 import pdfplumber
 import io
-import re
+import datetime
 
 def trimite_alerta(mesaj):
     token = os.environ.get('TELEGRAM_TOKEN')
@@ -11,42 +11,40 @@ def trimite_alerta(mesaj):
     requests.post(url, json={"chat_id": chat_id, "text": mesaj})
 
 def verifica():
-    # 1. URL-ul paginii de intreruperi
-    url_pagina = "https://www.reteleelectrice.ro/intreruperi/programate/"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    # Construim link-ul direct bazat pe data curenta
+    # Structura este: .../an/luna/Ilfov.pdf (luna cu 0 in fata daca e sub 10)
+    acum = datetime.datetime.now()
+    an = acum.year
+    luna = acum.strftime("%m")
     
+    pdf_url = f"https://www.reteleelectrice.ro/content/dam/retele-electrice/intreruperi/programate/{an}/{luna}/Ilfov.pdf"
+    
+    print(f"Incerc sa descarc PDF-ul: {pdf_url}")
+
     try:
-        res = requests.get(url_pagina, headers=headers)
-        # Cautam link-ul de Ilfov in codul sursa
-        links = re.findall(r'href=[\'"]?([^\'" >]+Ilfov[^\'" >]+\.pdf)', res.text)
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(pdf_url, headers=headers)
         
-        if not links:
-            trimite_alerta("❌ Nu am gasit link-ul PDF pe site. Verifica structura!")
+        if response.status_code != 200:
+            trimite_alerta(f"❌ Nu am putut accesa PDF-ul direct la adresa: {pdf_url}\nCod eroare: {response.status_code}")
             return
 
-        pdf_url = links[0] if links[0].startswith('http') else "https://www.reteleelectrice.ro" + links[0]
-        
-        # 2. Descarcam PDF-ul
-        pdf_res = requests.get(pdf_url, headers=headers)
-        with pdfplumber.open(io.BytesIO(pdf_res.content)) as pdf:
-            text_total = ""
+        with pdfplumber.open(io.BytesIO(response.content)) as pdf:
+            gasit = False
             for page in pdf.pages:
-                # Extragem textul si il curatam de caractere speciale
-                p_text = page.extract_text() or ""
-                text_total += p_text.lower() + " "
+                text = page.extract_text()
+                # Cautam "putna" fara sa ne pese de litere mari/mici
+                if text and "putna" in text.lower():
+                    gasit = True
+                    break
             
-            # Curatam textul de semne de punctuatie si spatii extra
-            text_total = re.sub(r'[^a-z0-9\s]', '', text_total)
-            
-            # 3. Cautare relaxata (cautam doar radacina "putna")
-            # Am scos "otopeni" ca sa fim siguri ca nu ratam din cauza formatarii
-            if "putna" in text_total:
-                trimite_alerta(f"⚠️ ATENȚIE! Strada PUTNA a fost găsită în listă!\nLink PDF: {pdf_url}")
+            if gasit:
+                trimite_alerta(f"⚠️ ATENȚIE! Strada PUTNA apare în lista de întreruperi!\nVerifică aici: {pdf_url}")
             else:
-                trimite_alerta(f"✅ Verificare OK: Strada Putna nu apare în PDF-ul curent.\n(Am verificat aici: {pdf_url})")
+                trimite_alerta(f"✅ Verificare OK: Strada Putna NU apare în PDF-ul de Ilfov ({luna}/{an}).")
 
     except Exception as e:
-        trimite_alerta(f"❌ Eroare la citire: {str(e)}")
+        trimite_alerta(f"❌ Eroare neprevazuta: {str(e)}")
 
 if __name__ == "__main__":
     verifica()
