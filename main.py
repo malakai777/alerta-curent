@@ -1,43 +1,59 @@
+import os
 import requests
-from bs4 import BeautifulSoup
 import pdfplumber
 import io
+from bs4 import BeautifulSoup
+import datetime
 
-# Configurare
-URL_PAGINA = "https://www.reteleelectrice.ro/intreruperi/programate/"
-STRADA_CAUTATA = "Putna"
-LOCALITATE = "Otopeni"
-TELEGRAM_TOKEN = "TOKEN_UL_TAU"
-TELEGRAM_CHAT_ID = "ID_UL_TAU"
+TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 def trimite_alerta(mesaj):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage?chat_id={TELEGRAM_CHAT_ID}&text={mesaj}"
-    requests.get(url)
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": mesaj}
+    requests.post(url, json=payload)
 
-def verifica_intreruperi():
-    response = requests.get(URL_PAGINA)
-    soup = BeautifulSoup(response.text, 'html.parser')
+def verifica():
+    url_pagina = "https://www.reteleelectrice.ro/intreruperi/programate/"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    res = requests.get(url_pagina, headers=headers)
+    soup = BeautifulSoup(res.text, 'html.parser')
     
-    # Căutăm toate link-urile către PDF-uri
-    links = soup.find_all('a', href=True)
+    # Pasul 1: Găsim toate link-urile care duc la PDF-uri de Ilfov
+    # Site-ul le listează de obicei pe toate, noi îl vrem pe cel mai nou
+    links = [a['href'] for a in soup.find_all('a', href=True) if "Ilfov" in a['href']]
     
-    for link in links:
-        href = link['href']
-        # Filtrăm PDF-ul de Ilfov (verifică structura numelui fisierului pe site)
-        if "Ilfov" in href and ".pdf" in href:
-            pdf_url = href if href.startswith('http') else "https://www.reteleelectrice.ro" + href
+    if not links:
+        print("Nu am găsit niciun PDF de Ilfov. Verifică dacă site-ul și-a schimbat structura.")
+        return
+
+    # Luăm primul link (de obicei cel de sus e cel mai recent)
+    pdf_url = links[0] if links[0].startswith('http') else "https://www.reteleelectrice.ro" + links[0]
+    print(f"Verific cel mai recent PDF găsit: {pdf_url}")
+
+    # Pasul 2: Citim PDF-ul
+    try:
+        pdf_res = requests.get(pdf_url, headers=headers)
+        with pdfplumber.open(io.BytesIO(pdf_res.content)) as pdf:
+            found = False
+            for i, page in enumerate(pdf.pages):
+                text = page.extract_text()
+                # Căutăm strada Putna în Otopeni (case insensitive)
+                if text and "putna" in text.lower() and "otopeni" in text.lower():
+                    msg = f"⚠️ ALERTA CURENT OTOPENI!\nStrada Putna a fost găsită în planificarea de întreruperi.\nDetalii în PDF: {pdf_url}"
+                    trimite_alerta(msg)
+                    print(f"Am găsit strada la pagina {i+1}")
+                    found = True
+                    break # Ne oprim la prima găsire
             
-            # Descarcă PDF-ul în memorie
-            pdf_file = requests.get(pdf_url)
-            with pdfplumber.open(io.BytesIO(pdf_file.content)) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if STRADA_CAUTATA.lower() in text.lower() and LOCALITATE.lower() in text.lower():
-                        trimite_alerta(f"⚠️ ATENȚIE! Strada {STRADA_CAUTATA} din {LOCALITATE} apare în lista de întreruperi: {pdf_url}")
-                        return
+            if not found:
+                print("Strada Putna nu figurează în acest PDF.")
+                # Opțional: trimite un mesaj de confirmare că scriptul a verificat dar e "curat"
+                # trimite_alerta("✅ Verificare finalizată: Nicio întrerupere găsită pentru Strada Putna.")
+                
+    except Exception as e:
+        print(f"Eroare la procesarea PDF-ului: {e}")
 
 if __name__ == "__main__":
-    try:
-        verifica_intreruperi()
-    except Exception as e:
-        print(f"Eroare: {e}")
+    verifica()
+    
