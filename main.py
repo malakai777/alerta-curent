@@ -1,8 +1,5 @@
 import os
 import requests
-import pdfplumber
-import io
-from datetime import datetime
 
 def trimite_alerta(mesaj):
     token = os.environ.get('TELEGRAM_TOKEN')
@@ -11,45 +8,34 @@ def trimite_alerta(mesaj):
     requests.post(url, json={"chat_id": chat_id, "text": mesaj})
 
 def verifica():
-    # Pasul 1: Construim link-ul exact pe care l-ai confirmat tu
-    acum = datetime.now()
-    pdf_url = f"https://www.reteleelectrice.ro/content/dam/retele-electrice/intreruperi/programate/{acum.year}/{acum.strftime('%m')}/Ilfov.pdf"
+    # Link-ul pe care l-ai confirmat tu manual
+    pdf_url = "https://www.reteleelectrice.ro/content/dam/retele-electrice/intreruperi/programate/2026/04/Ilfov.pdf"
     
-    # Pasul 2: Ne "deghizăm" robotul ca să nu fie respins
-    session = requests.Session()
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Referer': 'https://www.reteleelectrice.ro/intreruperi/programate/',
-        'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
     }
 
     try:
-        # Prima dată vizităm pagina principală ca să luăm "cookie-urile" de acces
-        session.get("https://www.reteleelectrice.ro/intreruperi/programate/", headers=headers, timeout=20)
+        # Incercam sa vedem doar daca fisierul EXISTA si ce marime are
+        r = requests.head(pdf_url, headers=headers, timeout=20)
         
-        # Acum încercăm să descărcăm PDF-ul folosind aceleași permisiuni
-        response = session.get(pdf_url, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            with pdfplumber.open(io.BytesIO(response.content)) as pdf:
-                # Extragem tot textul din toate paginile
-                text_complet = ""
-                for page in pdf.pages:
-                    text_complet += (page.extract_text() or "") + "\n"
-                
-                # Curățăm textul pentru o căutare sigură
-                text_final = " ".join(text_complet.lower().split())
-                
-                if "putna" in text_final:
-                    trimite_alerta(f"⚠️ ALERTĂ CURENT: Strada PUTNA apare în PDF-ul de Aprilie!\nSursa: {pdf_url}")
-                else:
-                    trimite_alerta(f"✅ Verificare reușită: Strada Putna NU apare în PDF-ul scanat ({acum.strftime('%m/%Y')}).")
+        status = r.status_code
+        lungime = r.headers.get('Content-Length', 'necunoscuta')
+        tip = r.headers.get('Content-Type', 'necunoscut')
+
+        if status == 200:
+            trimite_alerta(f"✅ SUCES! Robotul poate vedea fișierul.\nMarime: {lungime} bytes\nTip: {tip}\nAcum incerc sa-l citesc...")
+            # Daca status e 200, incercam descarcarea completa
+            res_full = requests.get(pdf_url, headers=headers)
+            if "putna" in res_full.text.lower(): # Cautare bruta in fluxul binar
+                 trimite_alerta("⚠️ ATENTIE: Am gasit 'Putna' in codul sursa al PDF-ului!")
+            else:
+                 trimite_alerta("❌ Fisierul e vizibil, dar cautarea text a esuat. Trebuie alta metoda de citire.")
         else:
-            # Dacă site-ul tot dă eroare, trimitem link-ul ca să verifici tu cu un click
-            trimite_alerta(f"ℹ️ Robotul a fost blocat de site (Eroare {response.status_code}).\nVerifică manual aici: {pdf_url}")
+            trimite_alerta(f"🚫 BLOCAJ: Site-ul refuza accesul (Cod {status}).\nMotiv probabil: Protectie anti-bot sau regiune blocata.")
 
     except Exception as e:
-        trimite_alerta(f"❌ Eroare tehnică: {str(e)}")
+        trimite_alerta(f"❌ Eroare la diagnostic: {str(e)}")
 
 if __name__ == "__main__":
     verifica()
